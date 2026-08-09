@@ -1,0 +1,19 @@
+# Generated datasets
+heat_exchange_data.csv
+heat_exchange_data_with_iforest.csv
+
+# Generated visualizations
+heat_exchange_temperature_trends.png
+heat_exchange_flow_return_scatter.png
+
+# Python cache and virtual environments
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+env/
+.env/
+
+# Jupyter and test cache
+.ipynb_checkpoints/
+.pytest_cache/
