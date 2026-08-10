@@ -2,9 +2,15 @@
 heat_exchange_data.csv
 heat_exchange_data_with_iforest.csv
 
-# Generated visualizations
-heat_exchange_temperature_trends.png
-heat_exchange_flow_return_scatter.png
+# Downloaded raw datasets (do not commit third-party data)
+data/raw/*.csv
+
+# Generated visualizations in the project root are ignored.
+heat_exchange_*.png
+
+# Curated visualizations under docs/ are intentionally tracked for README preview.
+!docs/
+!docs/*.png
 
 # Python cache and virtual environments
 __pycache__/

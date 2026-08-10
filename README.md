@@ -4,6 +4,7 @@
 
 ## 项目状态
 
+[![](https://img.shields.io/badge/version-1.1-blue)](#版本历史)
 [![](https://img.shields.io/badge/status-prototype-orange)](#项目定位)
 
 ## 项目背景
@@ -14,9 +15,9 @@
 
 ## 项目定位
 
-本项目是一个面向换热站场景的 Python 算法原型，用于验证“模拟数据生成 -> 异常注入 -> 可视化分析 -> 孤立森林检测”的基本流程。
+本项目是一个面向换热站场景的 Python 算法原型，支持“模拟数据生成”以及“读取 DHS 换热站真实 CSV”两种模式，并完成可视化分析和孤立森林检测。
 
-当前阶段为原型验证阶段。数据由脚本人工模拟生成，异常标签也由脚本人为注入，实验结果不能代表模型在真实换热站数据上的泛化能力。
+当前阶段为原型验证阶段。真实数据模式只负责离线读取、字段适配和异常点标记，不包含真实故障标签或在线告警闭环。
 
 **本项目不适用于生产环境。** 当前版本没有真实数据接入、数据质量管理、在线推理、告警闭环、权限控制、模型监控或安全保障能力，不能直接用于生产供热系统的自动控制和故障决策。
 
@@ -63,13 +64,25 @@ python -m pip install pandas numpy matplotlib seaborn scikit-learn
 
 ### 运行项目
 
-在项目根目录运行：
+默认使用 `auto` 模式：如果存在 `data/raw/PodstanicaL8.csv`，优先读取真实数据；否则使用模拟数据。
 
 ```powershell
 python .\heat_exchange_simulation.py
 ```
 
-脚本不需要命令行参数或外部输入文件。运行完成后，CSV 文件和 PNG 图片会保存到脚本所在目录。
+明确使用真实 CSV：
+
+```powershell
+python .\heat_exchange_simulation.py --source real --input .\data\raw\PodstanicaL8.csv
+```
+
+明确使用模拟数据：
+
+```powershell
+python .\heat_exchange_simulation.py --source simulated
+```
+
+运行完成后，CSV 文件和 PNG 图片会保存到脚本所在目录。
 
 ## 方法说明
 
@@ -92,9 +105,25 @@ python .\heat_exchange_simulation.py
 | 跑冒滴漏 | 2026-11-17 14:00 至 17:45 | `flow_rate` 提高约 40%，`return_temp` 降低约 6.5℃，`supply_temp` 不主动修改 |
 | 水力失调 | 2026-11-22 08:00 至 11:45 | `return_temp` 降低约 18℃，`valve_opening` 提高约 22%，`flow_rate` 降低约 42% |
 
+### 真实数据读取与字段适配
+
+本仓库使用的真实数据来源于 DHS（District Heating System，区域供热系统）公开运行数据集，包含二次网供/回水温度、换热功率及室外温度等逐时记录。
+
+真实数据文件为 `data/raw/PodstanicaL8.csv`，包含 11,399 条小时级记录。脚本读取后使用以下字段映射：
+
+| 原始列 | 统一列 | 含义 |
+| --- | --- | --- |
+| `datum` | `timestamp` | 日期时间，按日/月/年解析 |
+| `tsp` | `outside_temp` | 室外温度 |
+| `tns` | `supply_temp` | 二次侧供水温度 |
+| `tps` | `return_temp` | 二次侧回水温度 |
+| `qizm` | `heat_power` | 换热功率/传输热量，单位：kW |
+
+这份真实 CSV 没有阀门开度、室内温度和人工故障标签，因此脚本不会伪造这些字段。少量参与模型的缺失值会进行时间序列插值，`fault_type` 设置为 `未标注`。
+
 ### 特征工程
 
-当前版本没有额外生成滑动窗口、变化率或温差等派生特征，而是直接使用以下 5 个原始传感器特征训练孤立森林：
+模拟数据模式直接使用以下 5 个原始传感器特征训练孤立森林：
 
 ```text
 supply_temp
@@ -104,7 +133,16 @@ valve_opening
 outside_temp
 ```
 
-`indoor_temp` 和 `timestamp` 用于数据输出和分析，但不参与当前孤立森林训练。
+真实数据模式使用实际存在且完成插值的特征：
+
+```text
+supply_temp
+return_temp
+heat_power
+outside_temp
+```
+
+`indoor_temp`、`valve_opening` 和 `timestamp` 不参与当前孤立森林训练。真实数据没有 `flow_rate`，因此散点图横轴自动使用 `heat_power`。
 
 ### 模型选型与参数
 
@@ -142,25 +180,45 @@ IsolationForest(
 
 精确率的含义是：模型标出的 72 个异常点中，有 32 个是脚本注入的真实异常，即 `32 / 72 = 44.44%`。
 
+模拟数据中 44.44% 的精确率表明，无监督孤立森林会产生较多误报（虚警）。这也明确了下一步的优化方向：引入供热系统物理规则，例如供水温度变化率阈值和异常持续时长过滤，减少误报，而不是单纯依赖统计模型。
+
 当前结果说明模型能够识别本次人工注入的明显异常，但也产生了较多额外异常点。`100%` 召回率只适用于这批固定的模拟数据，不能作为真实生产环境的性能承诺。
+
+真实 DHS CSV 的首次测试结果如下：
+
+| 指标 | 结果 |
+| --- | ---: |
+| 数据量 | 11,399 |
+| 数据粒度 | 小时级 |
+| 模型使用特征 | `supply_temp`、`return_temp`、`heat_power`、`outside_temp` |
+| 模型标记异常点数量 | 570 |
+| 故障标签 | 无 |
+| 召回率 | 不计算 |
+
+真实数据没有人工故障标签，因此 `570` 个异常点只是模型结果，不能直接解释为 570 个真实故障。
 
 ### 可视化图表
 
-温度趋势图包含供水温度、回水温度和室外温度的 15 天变化曲线：
+温度趋势图包含供水温度、回水温度和室外温度的变化曲线；模拟数据为 15 天，真实数据按实际时间范围绘制：
 
-![换热站温度变化趋势](heat_exchange_temperature_trends.png)
+![换热站温度变化趋势](docs/heat_exchange_temperature_trends.png)
 
-流量-回水温度散点图使用不同颜色区分正常、跑冒滴漏和水力失调样本：
+散点图在模拟模式下按故障标签展示流量与回水温度的关系；在真实数据模式下，由于没有人工故障标签，按孤立森林预测结果区分模型正常点和模型异常点，并展示换热功率与回水温度的关系：
 
-![流量与回水温度关系](heat_exchange_flow_return_scatter.png)
+![流量与回水温度关系](docs/heat_exchange_flow_return_scatter.png)
+
+异常时间序列图将换热功率或流量、室外温度和孤立森林标记的异常点放在同一张图中，用于观察异常点的时间分布：
+
+![异常时间序列](docs/heat_exchange_anomaly_timeline.png)
 
 ## 不足与改进方向
 
 当前限制：
 
-- 数据完全由脚本模拟生成，不能代表真实换热站运行分布。
+- 真实 CSV 的列名和物理含义依赖数据集说明，当前只适配 `PodstanicaL8.csv` 的已确认字段。
+- 真实 CSV 没有故障标签，无法直接计算召回率、精确率或 F1-score。
 - 异常模式较简单，暂未模拟传感器漂移、缺失值、通信中断和多故障重叠。
-- 当前模型只使用 5 个原始特征，没有使用供回水温差、流量变化率等更有业务含义的派生特征。
+- 当前模型只使用原始特征，没有使用供回水温差、变化率和滑动统计等更有业务含义的派生特征。
 - `contamination=0.05` 是人为设定的先验比例，不一定适合真实数据。
 - 当前评估依赖脚本中人为注入的 `fault_type` 标签，尚未使用独立测试集或人工标注数据。
 - 当前只输出异常点级别结果，尚未将连续异常点聚合为故障事件。
@@ -168,7 +226,7 @@ IsolationForest(
 
 下一步计划：
 
-1. 接入真实换热站或区域供热数据，进行数据质量检查和时间对齐。
+1. 为真实数据增加人工复核或维护记录，建立可评估的故障标签。
 2. 增加供回水温差、温差变化率、流量变化率和滑动统计特征。
 3. 对比孤立森林、扩展孤立森林、自编码器和基于物理规律的规则检测。
 4. 增加精确率、F1-score、误报率和事件级召回率等指标。
@@ -180,7 +238,8 @@ IsolationForest(
 | 版本 | 日期 | 关键更新 |
 | --- | --- | --- |
 | V1.0 | 2026-08-09 | 模拟数据生成、孤立森林原型验证、README 初版 |
-| V1.1 | *计划中* | 接入 Kaggle 真实建筑能耗数据，增加业务规则过滤 |
+| V1.1 | 2026-08-10 | 接入 Kaggle DHS 换热站 CSV，增加真实数据字段适配和自动模式 |
+| V1.2 | *计划中* | 增加真实故障标签、业务规则过滤和事件级评估 |
 
 ## 项目结构
 
@@ -188,15 +247,20 @@ IsolationForest(
 Heat-Exchange-Station-Anomaly-Detection/
 ├── heat_exchange_simulation.py
 ├── README.md
+├── data/
+│   └── raw/
+│       └── PodstanicaL8.csv  # 本地下载，已被 .gitignore 忽略
 ├── heat_exchange_data.csv
 ├── heat_exchange_data_with_iforest.csv
-├── heat_exchange_temperature_trends.png
-└── heat_exchange_flow_return_scatter.png
+└── docs/
+    ├── heat_exchange_temperature_trends.png
+    ├── heat_exchange_flow_return_scatter.png
+    └── heat_exchange_anomaly_timeline.png
 ```
 
-其中，最后 4 个文件是运行脚本后生成的输出文件。
+其中，`PodstanicaL8.csv` 是本地下载的第三方原始数据，不应提交到仓库；`docs/` 中的三张图是用于 README 展示的可复现可视化产物。
 
-（最后四个文件为脚本运行后自动生成，可通过 `.gitignore` 排除。）
+根目录下的 CSV 和其他运行产物仍通过 `.gitignore` 排除。
 
 ## 技术栈
 
