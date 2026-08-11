@@ -23,3 +23,6 @@ env/
 # Jupyter and test cache
 .ipynb_checkpoints/
 .pytest_cache/
+
+# IDE metadata
+.idea/

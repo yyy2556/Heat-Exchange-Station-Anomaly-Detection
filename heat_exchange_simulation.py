@@ -349,9 +349,13 @@ def save_anomaly_timeline(data: pd.DataFrame) -> None:
 
 def run_isolation_forest(data: pd.DataFrame) -> pd.DataFrame:
     """使用孤立森林检测异常并保存带预测结果的数据。"""
+    data = data.copy()
+    data["temp_diff"] = data["supply_temp"] - data["return_temp"]
+
     feature_candidates = [
         "supply_temp",
         "return_temp",
+        "temp_diff",
         "flow_rate",
         "heat_power",
         "valve_opening",
@@ -371,7 +375,6 @@ def run_isolation_forest(data: pd.DataFrame) -> pd.DataFrame:
         random_state=RANDOM_SEED,
         n_estimators=200,
     )
-    data = data.copy()
     data["iforest_prediction"] = model.fit_predict(data[feature_columns])
     output_path = OUTPUT_DIR / "heat_exchange_data_with_iforest.csv"
     data.to_csv(output_path, index=False, encoding="utf-8-sig")

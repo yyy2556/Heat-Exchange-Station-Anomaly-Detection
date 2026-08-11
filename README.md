@@ -4,7 +4,7 @@
 
 ## 项目状态
 
-[![](https://img.shields.io/badge/version-1.1-blue)](#版本历史)
+[![](https://img.shields.io/badge/version-1.2-blue)](#版本历史)
 [![](https://img.shields.io/badge/status-prototype-orange)](#项目定位)
 
 ## 项目背景
@@ -107,7 +107,7 @@ python .\heat_exchange_simulation.py --source simulated
 
 ### 真实数据读取与字段适配
 
-本仓库使用的真实数据来源于 DHS（District Heating System，区域供热系统）公开运行数据集，包含二次网供/回水温度、换热功率及室外温度等逐时记录。
+本仓库使用的真实数据来源于 [Kaggle DHS Substation Data 公开数据集](https://www.kaggle.com/datasets/milanzdravkovic/dhs-substation-data)，即 DHS（District Heating System，区域供热系统）运行数据，包含二次网供/回水温度、换热功率及室外温度等逐时记录。
 
 真实数据文件为 `data/raw/PodstanicaL8.csv`，包含 11,399 条小时级记录。脚本读取后使用以下字段映射：
 
@@ -123,26 +123,28 @@ python .\heat_exchange_simulation.py --source simulated
 
 ### 特征工程
 
-模拟数据模式直接使用以下 5 个原始传感器特征训练孤立森林：
+模拟数据模式使用以下原始传感器特征及供回水温差训练孤立森林：
 
 ```text
 supply_temp
 return_temp
+temp_diff
 flow_rate
 valve_opening
 outside_temp
 ```
 
-真实数据模式使用实际存在且完成插值的特征：
+真实数据模式使用实际存在且完成插值的特征，并额外构造供回水温差：
 
 ```text
 supply_temp
 return_temp
+temp_diff
 heat_power
 outside_temp
 ```
 
-`indoor_temp`、`valve_opening` 和 `timestamp` 不参与当前孤立森林训练。真实数据没有 `flow_rate`，因此散点图横轴自动使用 `heat_power`。
+其中，`temp_diff = supply_temp - return_temp`，用于显式表达换热站供回水温差这一物理关系，帮助模型区分温度水平变化和供热工况异常。`indoor_temp`、`valve_opening` 和 `timestamp` 不参与当前孤立森林训练。真实数据没有 `flow_rate`，因此散点图横轴自动使用 `heat_power`。
 
 ### 模型选型与参数
 
@@ -162,6 +164,12 @@ IsolationForest(
 - `-1`：模型判定为异常
 
 ## 实验结果
+
+### 异常时间序列图
+
+这是本项目最直接的结果图：它将换热功率或流量、室外温度和孤立森林标记的异常点放在同一时间轴上，用于观察异常点是否集中出现、是否伴随运行变量突变。
+
+![异常时间序列](docs/heat_exchange_anomaly_timeline.png)
 
 ### 检测汇总表
 
@@ -190,12 +198,12 @@ IsolationForest(
 | --- | ---: |
 | 数据量 | 11,399 |
 | 数据粒度 | 小时级 |
-| 模型使用特征 | `supply_temp`、`return_temp`、`heat_power`、`outside_temp` |
+| 模型使用特征 | `supply_temp`、`return_temp`、`temp_diff`、`heat_power`、`outside_temp` |
 | 模型标记异常点数量 | 570 |
 | 故障标签 | 无 |
 | 召回率 | 不计算 |
 
-真实数据没有人工故障标签，因此 `570` 个异常点只是模型结果，不能直接解释为 570 个真实故障。
+真实数据没有人工故障标签，因此 `570` 个异常点只是模型结果，不能直接解释为 570 个真实故障。加入 `temp_diff` 后，模型显式使用供回水温差这一物理关系，但仍需要维护记录或人工复核来判断异常是否真实。
 
 ### 可视化图表
 
@@ -206,10 +214,6 @@ IsolationForest(
 散点图在模拟模式下按故障标签展示流量与回水温度的关系；在真实数据模式下，由于没有人工故障标签，按孤立森林预测结果区分模型正常点和模型异常点，并展示换热功率与回水温度的关系：
 
 ![流量与回水温度关系](docs/heat_exchange_flow_return_scatter.png)
-
-异常时间序列图将换热功率或流量、室外温度和孤立森林标记的异常点放在同一张图中，用于观察异常点的时间分布：
-
-![异常时间序列](docs/heat_exchange_anomaly_timeline.png)
 
 ## 不足与改进方向
 
@@ -239,7 +243,8 @@ IsolationForest(
 | --- | --- | --- |
 | V1.0 | 2026-08-09 | 模拟数据生成、孤立森林原型验证、README 初版 |
 | V1.1 | 2026-08-10 | 接入 Kaggle DHS 换热站 CSV，增加真实数据字段适配和自动模式 |
-| V1.2 | *计划中* | 增加真实故障标签、业务规则过滤和事件级评估 |
+| V1.2 | 2026-08-11 | 增加 `temp_diff` 特征、异常时间序列图、真实数据异常可视化和 Kaggle 来源说明 |
+| V1.3 | *计划中* | 增加真实故障标签、业务规则过滤和事件级评估 |
 
 ## 项目结构
 
